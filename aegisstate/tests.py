@@ -1,134 +1,149 @@
+
 import unittest
 
 from engine import AegisState
 
 
-class AegisStateTests(unittest.TestCase):
+class TestAegisStateDay4(unittest.TestCase):
 
-    def make_state(self):
-        state = AegisState()
+    def setUp(self):
+        self.state = AegisState()
 
-        state.add_dependency(
+        self.state.add_dependency(
             "risk_assessment",
             "transaction"
         )
 
-        state.add_dependency(
+        self.state.add_dependency(
             "approval",
             "risk_assessment"
         )
 
-        state.add_dependency(
+        self.state.add_dependency(
+            "approval",
+            "account_status"
+        )
+
+        self.state.add_dependency(
+            "approval",
+            "account_balance"
+        )
+
+        self.state.add_dependency(
             "agent_action",
             "approval"
         )
 
-        state.add_dependency(
-            "other_action",
-            "other_transaction"
+        self.state.add_dependency(
+            "inventory_report",
+            "inventory_data"
         )
 
-        return state
+        # Record initial decisions in dependency order.
+        for item in [
+            "risk_assessment",
+            "approval",
+            "agent_action",
+            "inventory_report"
+        ]:
+            result = self.state.record_decision(item)
+            self.assertTrue(result["recorded"])
 
-    def test_initial_actions_are_valid(self):
-        state = self.make_state()
-
+    def test_initial_action_is_valid(self):
         self.assertTrue(
-            state.validate("agent_action")["allowed"]
+            self.state.validate("agent_action")["valid"]
         )
 
-        self.assertTrue(
-            state.validate("other_action")["allowed"]
-        )
-
-    def test_change_invalidates_downstream_items(self):
-        state = self.make_state()
-
-        affected = state.set_version(
-            "transaction",
+    def test_balance_change_invalidates_approval(self):
+        self.state.set_version(
+            "account_balance",
             2
         )
 
-        self.assertEqual(
-            affected,
-            {
-                "risk_assessment",
-                "approval",
-                "agent_action"
-            }
+        self.assertFalse(
+            self.state.validate("approval")["valid"]
+        )
+
+    def test_invalidation_propagates_to_action(self):
+        self.state.set_version(
+            "account_balance",
+            2
         )
 
         self.assertFalse(
-            state.validate("agent_action")["allowed"]
+            self.state.validate("agent_action")["valid"]
         )
 
-    def test_unrelated_action_remains_valid(self):
-        state = self.make_state()
-
-        state.set_version("transaction", 2)
-
-        self.assertTrue(
-            state.validate("other_action")["allowed"]
-        )
-
-    def test_early_refresh_is_rejected(self):
-        state = self.make_state()
-
-        state.set_version("transaction", 2)
-
-        result = state.refresh("agent_action")
-
-        self.assertFalse(result["allowed"])
-
-    def test_bottom_up_refresh(self):
-        state = self.make_state()
-
-        state.set_version("transaction", 2)
-
-        self.assertTrue(
-            state.refresh(
-                "risk_assessment",
-                new_version=2
-            )["allowed"]
+    def test_unrelated_report_remains_valid(self):
+        self.state.set_version(
+            "account_balance",
+            2
         )
 
         self.assertTrue(
-            state.refresh(
-                "approval",
-                new_version=2
-            )["allowed"]
+            self.state.validate("inventory_report")["valid"]
+        )
+
+    def test_unrelated_risk_assessment_remains_valid(self):
+        self.state.set_version(
+            "account_balance",
+            2
         )
 
         self.assertTrue(
-            state.refresh(
-                "agent_action",
-                new_version=2
-            )["allowed"]
+            self.state.validate("risk_assessment")["valid"]
         )
 
-        self.assertTrue(
-            state.validate("agent_action")["allowed"]
-        )
-
-    def test_dependency_cycles_are_rejected(self):
-        state = AegisState()
-
-        state.add_dependency(
-            "approval",
-            "risk_assessment"
-        )
-
+    def test_circular_dependency_is_rejected(self):
         with self.assertRaises(ValueError):
-            state.add_dependency(
-                "risk_assessment",
-                "approval"
+            self.state.add_dependency(
+                "transaction",
+                "agent_action"
             )
 
-    def test_unknown_items_are_blocked(self):
-        state = self.make_state()
+        # The rejected relationship must not remain.
+        self.assertNotIn(
+            "agent_action",
+            self.state.dependencies["transaction"]
+        )
 
+    def test_duplicate_dependency_is_ignored(self):
+        before = set(
+            self.state.dependencies["approval"]
+        )
+
+        self.state.add_dependency(
+            "approval",
+            "account_balance"
+        )
+
+        self.assertEqual(
+            before,
+            self.state.dependencies["approval"]
+        )
+
+    def test_same_version_does_not_invalidate(self):
+        affected = self.state.set_version(
+            "account_balance",
+            1
+        )
+
+        self.assertEqual(affected, [])
+
+        self.assertTrue(
+            self.state.validate("agent_action")["valid"]
+        )
+
+    def test_invalid_version_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.state.set_version(
+                "account_balance",
+                0
+            )
+
+    def test_unknown_item_is_invalid(self):
         self.assertFalse(
-            state.validate("unknown_action")["allowed"]
+            self.state.validate("unknown")["valid"]
         )
 
 

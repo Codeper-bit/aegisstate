@@ -1,230 +1,237 @@
 class AegisState:
     def __init__(self):
-        # Each item records the items it depends on.
         self.dependencies = {}
-
-        # Stores the current version of each item.
         self.versions = {}
-
-        # Stores decisions that have become outdated.
         self.invalidated = set()
+        self.provenance = {}
 
     def add_item(self, item, version=1):
-        """Register an item in the dependency graph."""
-
         if not isinstance(item, str) or not item:
-            raise ValueError("Item must be a non-empty string.")
+            raise ValueError(
+                "Item name must be a non-empty string"
+            )
 
-        if not isinstance(version, int) or version < 1:
-            raise ValueError("Version must be an integer >= 1.")
+        if (
+            not isinstance(version, int)
+            or isinstance(version, bool)
+            or version < 1
+        ):
+            raise ValueError(
+                "Version must be a positive integer"
+            )
 
-        self.dependencies.setdefault(item, set())
-        self.versions.setdefault(item, version)
+        if item not in self.dependencies:
+            self.dependencies[item] = set()
+            self.versions[item] = version
 
     def add_dependency(self, item, depends_on):
-        """Record that one item depends on another."""
-
         if item == depends_on:
-            raise ValueError("An item cannot depend on itself.")
+            raise ValueError(
+                "An item cannot depend on itself"
+            )
 
         self.add_item(item)
         self.add_item(depends_on)
 
+        # Do not invalidate anything if the relationship
+        # already exists.
+        if depends_on in self.dependencies[item]:
+            return
+
         self.dependencies[item].add(depends_on)
 
-        # Reject relationships that create dependency cycles.
+        # Roll back the relationship if it creates a cycle.
         if self._has_cycle():
             self.dependencies[item].remove(depends_on)
+
             raise ValueError(
-                "This dependency would create a cycle."
+                "Circular dependency detected"
             )
 
-    def _has_cycle(self):
-        """Check whether the graph contains a cycle."""
+        # The item's meaning may have changed because
+        # its dependency set changed.
+        affected = {item} | self._descendants(item)
 
+        self.invalidated.update(affected)
+
+    def _has_cycle(self):
         visiting = set()
         visited = set()
 
-        def visit(node):
-            if node in visiting:
+        def visit(item):
+            if item in visiting:
                 return True
 
-            if node in visited:
+            if item in visited:
                 return False
 
-            visiting.add(node)
+            visiting.add(item)
 
-            for dependency in self.dependencies.get(node, set()):
+            for dependency in self.dependencies.get(
+                item, set()
+            ):
                 if visit(dependency):
                     return True
 
-            visiting.remove(node)
-            visited.add(node)
+            visiting.remove(item)
+            visited.add(item)
 
             return False
 
-        return any(
-            visit(node)
-            for node in list(self.dependencies)
-        )
+        for item in self.dependencies:
+            if item not in visited:
+                if visit(item):
+                    return True
+
+        return False
 
     def _descendants(self, changed_item):
-        """Find every direct and indirect dependant."""
-
         affected = set()
-        to_check = [changed_item]
+        pending = [changed_item]
 
-        while to_check:
-            current = to_check.pop()
+        while pending:
+            current = pending.pop()
 
             for item, dependencies in self.dependencies.items():
-
                 if (
                     current in dependencies
                     and item not in affected
                 ):
                     affected.add(item)
-                    to_check.append(item)
+                    pending.append(item)
 
         return affected
 
     def set_version(self, item, version):
-        """Update an item's version and automatically
-        invalidate all dependent decisions.
-        """
-
-        if not isinstance(version, int) or version < 1:
+        if (
+            not isinstance(version, int)
+            or isinstance(version, bool)
+            or version < 1
+        ):
             raise ValueError(
-                "Version must be an integer >= 1."
+                "Version must be a positive integer"
             )
 
-        if item not in self.versions:
-            self.add_item(item)
+        self.add_item(item)
 
-        old_version = self.versions[item]
-
-        # Nothing changed, so no invalidation is needed.
-        if old_version == version:
-            return set()
+        # No change means no new invalidation.
+        if self.versions[item] == version:
+            return []
 
         self.versions[item] = version
 
-        # Invalidate every downstream dependant.
         affected = self._descendants(item)
 
         self.invalidated.update(affected)
 
-        return affected
+        return sorted(affected)
+
+    def record_decision(self, item):
+        if item not in self.dependencies:
+            return {
+                "recorded": False,
+                "reason": "Unknown item"
+            }
+
+        # A decision can only be recorded if every
+        # dependency is currently valid.
+        for dependency in sorted(
+            self.dependencies[item]
+        ):
+            result = self.validate(dependency)
+
+            if not result["valid"]:
+                return {
+                    "recorded": False,
+                    "reason": (
+                        f"Dependency '{dependency}' "
+                        "is invalid"
+                    )
+                }
+
+        evidence_versions = {
+            dependency: self.versions[dependency]
+            for dependency in sorted(
+                self.dependencies[item]
+            )
+        }
+
+        self.provenance[item] = evidence_versions
+        self.invalidated.discard(item)
+
+        return {
+            "recorded": True,
+            "item": item,
+            "based_on": evidence_versions
+        }
 
     def validate(self, item):
-        """Check an item and its entire dependency chain."""
-
-        if item not in self.versions:
+        if item not in self.dependencies:
             return {
-                "allowed": False,
-                "reason": f"Unknown item: {item}"
+                "valid": False,
+                "reason": "Unknown item"
             }
 
         if item in self.invalidated:
             return {
-                "allowed": False,
-                "reason": (
-                    f"{item} is invalidated "
-                    "and must be refreshed."
-                )
+                "valid": False,
+                "reason": "Decision invalidated"
             }
 
-        for dependency in sorted(
-            self.dependencies.get(item, set())
-        ):
+        dependencies = self.dependencies[item]
 
+        for dependency in sorted(dependencies):
             result = self.validate(dependency)
 
-            if not result["allowed"]:
+            if not result["valid"]:
                 return {
-                    "allowed": False,
+                    "valid": False,
                     "reason": (
-                        f"{item} depends on invalid item "
-                        f"'{dependency}': {result['reason']}"
+                        f"Dependency '{dependency}' "
+                        "is invalid"
                     )
                 }
 
-        return {
-            "allowed": True,
-            "reason": (
-                f"{item} and its dependencies are valid."
-            )
-        }
-
-    def refresh(self, item, new_version=None):
-        """Refresh a decision after its dependencies
-        have been checked.
-        """
-
-        if item not in self.versions:
+        # A decision with dependencies needs recorded
+        # provenance before it can be trusted.
+        if dependencies and item not in self.provenance:
             return {
-                "allowed": False,
-                "reason": f"Unknown item: {item}"
+                "valid": False,
+                "reason": "Missing decision provenance"
             }
 
-        # All dependencies must be valid first.
-        for dependency in sorted(
-            self.dependencies.get(item, set())
-        ):
+        recorded = self.provenance.get(item, {})
 
-            result = self.validate(dependency)
-
-            if not result["allowed"]:
+        for dependency in dependencies:
+            if (
+                recorded.get(dependency)
+                != self.versions[dependency]
+            ):
                 return {
-                    "allowed": False,
+                    "valid": False,
                     "reason": (
-                        f"Cannot refresh {item}: "
-                        f"dependency '{dependency}' "
-                        "is not valid."
+                        f"Stale evidence: "
+                        f"'{dependency}' changed"
                     )
                 }
 
-        # Optionally record a new decision version.
-        if new_version is not None:
-
-            if (
-                not isinstance(new_version, int)
-                or new_version < 1
-            ):
-                raise ValueError(
-                    "Version must be an integer >= 1."
-                )
-
-            old_version = self.versions[item]
-
-            self.versions[item] = new_version
-
-            # A changed decision can invalidate its dependants.
-            if old_version != new_version:
-
-                affected = self._descendants(item)
-                self.invalidated.update(affected)
-
-        self.invalidated.discard(item)
-
         return {
-            "allowed": True,
-            "reason": f"{item} refreshed successfully."
+            "valid": True,
+            "reason": "Decision is valid"
         }
 
     def snapshot(self):
-        """Return a readable snapshot of the engine state."""
-
         return {
-            "versions": dict(
-                sorted(self.versions.items())
-            ),
-
+            "versions": dict(self.versions),
             "dependencies": {
                 item: sorted(dependencies)
                 for item, dependencies
-                in sorted(self.dependencies.items())
+                in self.dependencies.items()
             },
-
-            "invalidated": sorted(self.invalidated)
+            "invalidated": sorted(self.invalidated),
+            "provenance": {
+                item: dict(evidence)
+                for item, evidence
+                in self.provenance.items()
+            }
         }
