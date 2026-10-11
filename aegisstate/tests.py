@@ -4,7 +4,7 @@ import unittest
 from engine import AegisState
 
 
-class TestAegisStateDay4(unittest.TestCase):
+class TestAegisStateDay5(unittest.TestCase):
 
     def setUp(self):
         self.state = AegisState()
@@ -20,130 +20,114 @@ class TestAegisStateDay4(unittest.TestCase):
         )
 
         self.state.add_dependency(
-            "approval",
-            "account_status"
-        )
-
-        self.state.add_dependency(
-            "approval",
-            "account_balance"
-        )
-
-        self.state.add_dependency(
             "agent_action",
             "approval"
         )
 
-        self.state.add_dependency(
-            "inventory_report",
-            "inventory_data"
-        )
-
-        # Record initial decisions in dependency order.
-        for item in [
+        self.state.commit_decision(
             "risk_assessment",
-            "approval",
-            "agent_action",
-            "inventory_report"
-        ]:
-            result = self.state.record_decision(item)
-            self.assertTrue(result["recorded"])
+            {"risk_score": 20}
+        )
 
-    def test_initial_action_is_valid(self):
+        self.state.commit_decision(
+            "approval",
+            {"approved": True}
+        )
+
+        self.state.commit_decision(
+            "agent_action",
+            {"action": "execute"}
+        )
+
+    def test_initial_decision_is_valid(self):
         self.assertTrue(
             self.state.validate("agent_action")["valid"]
         )
 
-    def test_balance_change_invalidates_approval(self):
-        self.state.set_version(
-            "account_balance",
-            2
-        )
-
-        self.assertFalse(
-            self.state.validate("approval")["valid"]
-        )
-
-    def test_invalidation_propagates_to_action(self):
-        self.state.set_version(
-            "account_balance",
-            2
-        )
+    def test_transaction_change_invalidates_chain(self):
+        self.state.set_version("transaction", 2)
 
         self.assertFalse(
             self.state.validate("agent_action")["valid"]
         )
 
-    def test_unrelated_report_remains_valid(self):
-        self.state.set_version(
-            "account_balance",
-            2
-        )
+    def test_early_approval_commit_is_rejected(self):
+        self.state.set_version("transaction", 2)
 
-        self.assertTrue(
-            self.state.validate("inventory_report")["valid"]
-        )
-
-    def test_unrelated_risk_assessment_remains_valid(self):
-        self.state.set_version(
-            "account_balance",
-            2
-        )
-
-        self.assertTrue(
-            self.state.validate("risk_assessment")["valid"]
-        )
-
-    def test_circular_dependency_is_rejected(self):
-        with self.assertRaises(ValueError):
-            self.state.add_dependency(
-                "transaction",
-                "agent_action"
-            )
-
-        # The rejected relationship must not remain.
-        self.assertNotIn(
-            "agent_action",
-            self.state.dependencies["transaction"]
-        )
-
-    def test_duplicate_dependency_is_ignored(self):
-        before = set(
-            self.state.dependencies["approval"]
-        )
-
-        self.state.add_dependency(
+        result = self.state.commit_decision(
             "approval",
-            "account_balance"
+            {"approved": True}
         )
+
+        self.assertFalse(result["committed"])
+
+    def test_recovery_in_dependency_order(self):
+        self.state.set_version("transaction", 2)
+
+        self.assertTrue(
+            self.state.commit_decision(
+                "risk_assessment",
+                {"risk_score": 35}
+            )["committed"]
+        )
+
+        self.assertTrue(
+            self.state.commit_decision(
+                "approval",
+                {"approved": True}
+            )["committed"]
+        )
+
+        self.assertTrue(
+            self.state.commit_decision(
+                "agent_action",
+                {"action": "execute"}
+            )["committed"]
+        )
+
+        self.assertTrue(
+            self.state.validate("agent_action")["valid"]
+        )
+
+    def test_none_result_is_rejected(self):
+        result = self.state.commit_decision(
+            "risk_assessment",
+            None
+        )
+
+        self.assertFalse(result["committed"])
+
+    def test_unknown_item_is_rejected(self):
+        result = self.state.commit_decision(
+            "unknown",
+            {"value": 1}
+        )
+
+        self.assertFalse(result["committed"])
+
+    def test_result_is_copied(self):
+        result = {"risk_score": 20}
+
+        self.state.commit_decision(
+            "risk_assessment",
+            result
+        )
+
+        result["risk_score"] = 999
 
         self.assertEqual(
-            before,
-            self.state.dependencies["approval"]
+            self.state.results["risk_assessment"],
+            {"risk_score": 20}
         )
 
-    def test_same_version_does_not_invalidate(self):
-        affected = self.state.set_version(
-            "account_balance",
-            1
-        )
+    def test_snapshot_contains_provenance(self):
+        snapshot = self.state.snapshot()
 
-        self.assertEqual(affected, [])
-
-        self.assertTrue(
-            self.state.validate("agent_action")["valid"]
-        )
-
-    def test_invalid_version_is_rejected(self):
-        with self.assertRaises(ValueError):
-            self.state.set_version(
-                "account_balance",
-                0
-            )
-
-    def test_unknown_item_is_invalid(self):
-        self.assertFalse(
-            self.state.validate("unknown")["valid"]
+        self.assertIn(
+            "transaction",
+            snapshot["provenance"]["risk_assessment"][
+                "dependency_versions"
+            ]
         )
 
 

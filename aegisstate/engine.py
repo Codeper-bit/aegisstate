@@ -1,9 +1,13 @@
+from copy import deepcopy
+
+
 class AegisState:
     def __init__(self):
         self.dependencies = {}
         self.versions = {}
         self.invalidated = set()
         self.provenance = {}
+        self.results = {}
 
     def add_item(self, item, version=1):
         if not isinstance(item, str) or not item:
@@ -33,14 +37,11 @@ class AegisState:
         self.add_item(item)
         self.add_item(depends_on)
 
-        # Do not invalidate anything if the relationship
-        # already exists.
         if depends_on in self.dependencies[item]:
             return
 
         self.dependencies[item].add(depends_on)
 
-        # Roll back the relationship if it creates a cycle.
         if self._has_cycle():
             self.dependencies[item].remove(depends_on)
 
@@ -48,8 +49,6 @@ class AegisState:
                 "Circular dependency detected"
             )
 
-        # The item's meaning may have changed because
-        # its dependency set changed.
         affected = {item} | self._descendants(item)
 
         self.invalidated.update(affected)
@@ -79,9 +78,8 @@ class AegisState:
             return False
 
         for item in self.dependencies:
-            if item not in visited:
-                if visit(item):
-                    return True
+            if item not in visited and visit(item):
+                return True
 
         return False
 
@@ -114,7 +112,6 @@ class AegisState:
 
         self.add_item(item)
 
-        # No change means no new invalidation.
         if self.versions[item] == version:
             return []
 
@@ -126,29 +123,44 @@ class AegisState:
 
         return sorted(affected)
 
-    def record_decision(self, item):
+    def commit_decision(self, item, result):
+        """
+        Commit a newly calculated decision.
+
+        The caller must calculate the result before submitting it.
+        AegisState validates dependencies and records the versions
+        used to support the submitted result.
+
+        This prototype does not independently prove that the result
+        was calculated correctly.
+        """
+
         if item not in self.dependencies:
             return {
-                "recorded": False,
+                "committed": False,
                 "reason": "Unknown item"
             }
 
-        # A decision can only be recorded if every
-        # dependency is currently valid.
-        for dependency in sorted(
-            self.dependencies[item]
-        ):
-            result = self.validate(dependency)
+        if result is None:
+            return {
+                "committed": False,
+                "reason": "Decision result cannot be None"
+            }
 
-            if not result["valid"]:
+        # Check every dependency before accepting the decision.
+        for dependency in sorted(self.dependencies[item]):
+            validation = self.validate(dependency)
+
+            if not validation["valid"]:
                 return {
-                    "recorded": False,
+                    "committed": False,
                     "reason": (
                         f"Dependency '{dependency}' "
                         "is invalid"
                     )
                 }
 
+        # Capture the versions that support this decision.
         evidence_versions = {
             dependency: self.versions[dependency]
             for dependency in sorted(
@@ -156,13 +168,25 @@ class AegisState:
             )
         }
 
-        self.provenance[item] = evidence_versions
+        # Store a copy so later changes to a mutable object
+        # supplied by the caller do not silently change
+        # the recorded result.
+        self.results[item] = deepcopy(result)
+
+        self.provenance[item] = {
+            "dependency_versions": evidence_versions,
+            "item_version": self.versions[item]
+        }
+
         self.invalidated.discard(item)
 
         return {
-            "recorded": True,
+            "committed": True,
             "item": item,
-            "based_on": evidence_versions
+            "result": deepcopy(self.results[item]),
+            "provenance": deepcopy(
+                self.provenance[item]
+            )
         }
 
     def validate(self, item):
@@ -181,9 +205,9 @@ class AegisState:
         dependencies = self.dependencies[item]
 
         for dependency in sorted(dependencies):
-            result = self.validate(dependency)
+            validation = self.validate(dependency)
 
-            if not result["valid"]:
+            if not validation["valid"]:
                 return {
                     "valid": False,
                     "reason": (
@@ -192,28 +216,32 @@ class AegisState:
                     )
                 }
 
-        # A decision with dependencies needs recorded
-        # provenance before it can be trusted.
+        # An item with dependencies needs a committed result.
         if dependencies and item not in self.provenance:
             return {
                 "valid": False,
                 "reason": "Missing decision provenance"
             }
 
-        recorded = self.provenance.get(item, {})
+        if dependencies:
+            record = self.provenance[item]
 
-        for dependency in dependencies:
-            if (
-                recorded.get(dependency)
-                != self.versions[dependency]
-            ):
-                return {
-                    "valid": False,
-                    "reason": (
-                        f"Stale evidence: "
-                        f"'{dependency}' changed"
-                    )
-                }
+            recorded_versions = record[
+                "dependency_versions"
+            ]
+
+            for dependency in dependencies:
+                if (
+                    recorded_versions.get(dependency)
+                    != self.versions[dependency]
+                ):
+                    return {
+                        "valid": False,
+                        "reason": (
+                            f"Stale evidence: "
+                            f"'{dependency}' changed"
+                        )
+                    }
 
         return {
             "valid": True,
@@ -229,9 +257,6 @@ class AegisState:
                 in self.dependencies.items()
             },
             "invalidated": sorted(self.invalidated),
-            "provenance": {
-                item: dict(evidence)
-                for item, evidence
-                in self.provenance.items()
-            }
+            "provenance": deepcopy(self.provenance),
+            "results": deepcopy(self.results)
         }

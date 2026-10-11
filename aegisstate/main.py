@@ -4,9 +4,9 @@ from engine import AegisState
 
 state = AegisState()
 
-print("\n=== AEGISSTATE DAY 4 ===")
+print("\n=== AEGISSTATE DAY 5 ===")
 
-# Build a branching dependency graph.
+# Build the dependency graph.
 state.add_dependency(
     "risk_assessment",
     "transaction"
@@ -18,76 +18,91 @@ state.add_dependency(
 )
 
 state.add_dependency(
-    "approval",
-    "account_status"
-)
-
-state.add_dependency(
-    "approval",
-    "account_balance"
-)
-
-state.add_dependency(
     "agent_action",
     "approval"
 )
 
-# Create an unrelated decision.
-state.add_dependency(
-    "inventory_report",
-    "inventory_data"
+# Record initial decisions in dependency order.
+print("\n1. Initial decision commits")
+
+print(
+    state.commit_decision(
+        "risk_assessment",
+        {"risk_score": 20}
+    )
 )
 
-# Record decisions in dependency order.
-items = [
-    "risk_assessment",
-    "approval",
-    "agent_action",
-    "inventory_report"
-]
+print(
+    state.commit_decision(
+        "approval",
+        {"approved": True}
+    )
+)
 
-print("\n1. Recording decisions")
+print(
+    state.commit_decision(
+        "agent_action",
+        {"action": "execute_transaction"}
+    )
+)
 
-for item in items:
-    print(item, state.record_decision(item))
+print("\n2. Validate original action")
 
-# Check initial validity.
-print("\n2. Initial validation")
+print(state.validate("agent_action"))
+
+print("\n3. Transaction changes")
+
+print(
+    "Invalidated:",
+    state.set_version("transaction", 2)
+)
 
 print(
     "Agent action:",
     state.validate("agent_action")
 )
 
-print(
-    "Inventory report:",
-    state.validate("inventory_report")
-)
-
-# Change one dependency of the approval.
-print("\n3. Account balance changes")
-
-affected = state.set_version(
-    "account_balance",
-    2
-)
-
-print("Affected decisions:", affected)
-
-# Check selective invalidation.
-print("\n4. Validate after the change")
+# Try to commit an approval too early.
+print("\n4. Try premature recovery")
 
 print(
-    "Agent action:",
-    state.validate("agent_action")
+    state.commit_decision(
+        "approval",
+        {"approved": True}
+    )
 )
+
+print("\n5. Recalculate risk assessment")
 
 print(
-    "Inventory report:",
-    state.validate("inventory_report")
+    state.commit_decision(
+        "risk_assessment",
+        {"risk_score": 35}
+    )
 )
 
-# Show the engine state.
-print("\n5. Final snapshot")
+print("\n6. Recalculate approval")
+
+print(
+    state.commit_decision(
+        "approval",
+        {"approved": True}
+    )
+)
+
+print("\n7. Recalculate agent action")
+
+print(
+    state.commit_decision(
+        "agent_action",
+        {"action": "execute_transaction"}
+    )
+)
+
+print("\n8. Final validation")
+
+print(state.validate("agent_action"))
+
+print("\n9. Final snapshot")
 
 print(state.snapshot())
