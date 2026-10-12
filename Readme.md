@@ -1,45 +1,29 @@
-# AegisState
+Quick Start
 
-AegisState is a Python prototype exploring dependency-aware
-invalidation of AI-agent decisions.
+AegisState helps prevent AI-agent actions from relying on outdated decisions.
 
-## Problem
+Installation
 
-An agent may make a decision using evidence that later changes.
-If the agent continues to rely on that old decision, it may
-perform an action using outdated information.
+Clone the repository and install the package locally:
 
-## Proposed approach
+python -m pip install --no-build-isolation -e .
 
-AegisState records dependencies between evidence, assessments,
-approvals, and actions.
+Run the Example
 
-When an item's version changes, the engine invalidates its
-downstream dependants.
+python examples/basic_usage.py
 
-Before an action proceeds, the engine validates the action and
-its dependency chain.
+The example creates a dependency chain from transaction evidence to an agent action. When the transaction version changes, AegisState invalidates dependent decisions, and the protected executor blocks the stale action.
 
-Unrelated decisions should remain usable.
+Run the Tests
 
-## Current features
+python -m unittest discover -s aegisstate/tests -v
 
-- Dependency graph
-- Automatic invalidation after version changes
-- Transitive dependency propagation
-- Recursive validation
-- Refresh checks
-- Cycle detection
-- Deterministic agent simulator
-- Automated unit tests
+Run the tests from the repository root.
 
-## Technology
+Core Capabilities
 
-- Python
-- Standard library only
-- unittest
-
-## Run the demonstration
-
-```bash
-python main.py
+- Track dependencies between evidence and decisions.
+- Detect stale decisions when underlying versions change.
+- Invalidate affected downstream decisions.
+- Preserve unrelated decisions where their dependencies remain valid.
+- Block protected actions when their required decisions are invalid.
