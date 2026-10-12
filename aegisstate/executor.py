@@ -4,9 +4,6 @@ class ProtectedExecutor:
         self.execution_log = []
 
     def execute(self, action_name, required_decision, action):
-        """
-        Execute an action only if its required decision is valid.
-        """
 
         validation = self.state.validate(required_decision)
 

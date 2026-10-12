@@ -4,9 +4,7 @@ from engine import AegisState
 
 state = AegisState()
 
-print("\n=== AEGISSTATE DAY 5 ===")
 
-# Build the dependency graph.
 state.add_dependency(
     "risk_assessment",
     "transaction"
@@ -22,7 +20,6 @@ state.add_dependency(
     "approval"
 )
 
-# Record initial decisions in dependency order.
 print("\n1. Initial decision commits")
 
 print(
@@ -62,7 +59,6 @@ print(
     state.validate("agent_action")
 )
 
-# Try to commit an approval too early.
 print("\n4. Try premature recovery")
 
 print(
