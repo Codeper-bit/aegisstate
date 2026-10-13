@@ -1,6 +1,6 @@
-
 from collections.abc import Mapping
 
+from .replay_store import InMemoryReplayStore
 from .report_bridge import ReportBridge
 
 
@@ -12,18 +12,25 @@ class ReplayProtectedReportBridge:
     """
     Rejects duplicate report IDs before delegating to ReportBridge.
 
-    Replay history is kept in memory for this process only.
+    The report ID is reserved BEFORE processing, so two concurrent
+    submissions of the same report cannot both pass. If processing fails,
+    the reservation is released so a corrected report can be retried.
+
+    By default replay history lives in memory for this process only; pass a
+    SQLiteReplayStore to make it survive restarts.
     """
 
-    def __init__(self, state):
+    def __init__(self, state, replay_store=None):
         self.bridge = ReportBridge(state)
-        self.processed_report_ids = set()
+        self.replay_store = (
+            replay_store
+            if replay_store is not None
+            else InMemoryReplayStore()
+        )
 
     def process_report(self, report):
         if not isinstance(report, Mapping):
-            raise ReportReplayError(
-                "Report must be a mapping."
-            )
+            raise ReportReplayError("Report must be a mapping.")
 
         report_id = report.get("report_id")
 
@@ -32,15 +39,23 @@ class ReplayProtectedReportBridge:
                 "A non-empty report_id is required."
             )
 
-        if report_id in self.processed_report_ids:
+        if not self.replay_store.reserve(report_id):
             raise ReportReplayError(
                 f"Report already processed: {report_id}"
             )
 
-        # Process the report first. Failed reports are not recorded.
-        result = self.bridge.process_report(report)
+        try:
+            result = self.bridge.process_report(report)
 
-        # Record the ID only after successful processing.
-        self.processed_report_ids.add(report_id)
+            # An engine refusal (e.g. an invalid dependency) is a failure
+            # too: free the ID so the report can be retried.
+            if not result.get("committed", False):
+                self.replay_store.release(report_id)
+                return result
 
-        return result
+            self.replay_store.mark_processed(report_id)
+            return result
+
+        except BaseException:
+            self.replay_store.release(report_id)
+            raise

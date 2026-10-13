@@ -32,6 +32,14 @@ class ReportBridge:
                 f"Unknown evidence: {evidence_id}"
             )
 
+        # Without this check, a report could cite any unrelated evidence
+        # that happens to be current and still be committed.
+        if evidence_id not in self.state.dependencies[decision_id]:
+            raise ReportValidationError(
+                f"Evidence '{evidence_id}' is not a dependency "
+                f"of decision '{decision_id}'"
+            )
+
         current_version = self.state.versions[evidence_id]
 
         if reported_version != current_version:

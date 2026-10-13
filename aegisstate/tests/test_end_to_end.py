@@ -1,8 +1,8 @@
 
 import unittest
 
-from engine import AegisState
-from executor import ProtectedExecutor
+from aegisstate.engine import AegisState
+from aegisstate.executor import ProtectedExecutor
 from aegisstate.report_bridge import ReportBridge, StaleEvidenceError
 
 

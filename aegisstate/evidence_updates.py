@@ -15,7 +15,10 @@ class TrustedEvidenceUpdater:
 
     def update_evidence(self, evidence_id):
         # The evidence must already exist.
-        if evidence_id not in self.state.versions:
+        if (
+            not isinstance(evidence_id, str)
+            or evidence_id not in self.state.versions
+        ):
             raise EvidenceUpdateError(
                 f"Unknown evidence: {evidence_id}"
             )

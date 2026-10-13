@@ -1,8 +1,8 @@
 
 import unittest
 
-from engine import AegisState
-from executor import ProtectedExecutor
+from aegisstate.engine import AegisState
+from aegisstate.executor import ProtectedExecutor
 
 
 class TestDay10Safety(unittest.TestCase):

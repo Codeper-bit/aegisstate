@@ -1,7 +1,7 @@
 
 import unittest
 
-from engine import AegisState
+from aegisstate.engine import AegisState
 from aegisstate.report_security import (
     ReplayProtectedReportBridge,
     ReportReplayError,

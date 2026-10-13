@@ -1,5 +1,5 @@
 
-from engine import AegisState
+from aegisstate.engine import AegisState
 
 
 state = AegisState()

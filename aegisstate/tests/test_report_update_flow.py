@@ -1,9 +1,9 @@
 
 import unittest
 
-from engine import AegisState
-from executor import ProtectedExecutor
-from evidence_updates import (
+from aegisstate.engine import AegisState
+from aegisstate.executor import ProtectedExecutor
+from aegisstate.evidence_updates import (
     TrustedEvidenceUpdater,
 )
 from aegisstate.report_bridge import (

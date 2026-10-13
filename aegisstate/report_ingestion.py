@@ -3,6 +3,7 @@
 Schema validation checks report structure, not truth. The integrating
 application must establish authoritative evidence versions.
 """
+import math
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -65,8 +66,15 @@ class ReportIngestor:
                 continue
 
             value = report[name]
-            if rule.expected_type is int and isinstance(value, bool):
-                raise ReportValidationError(f"Field '{name}' must be int, not bool")
+            allowed_types = (
+                rule.expected_type
+                if isinstance(rule.expected_type, tuple)
+                else (rule.expected_type,)
+            )
+            # bool is a subclass of int, so True would otherwise pass as 1
+            # for any numeric field.
+            if isinstance(value, bool) and bool not in allowed_types:
+                raise ReportValidationError(f"Field '{name}' must not be a bool")
             if not isinstance(value, rule.expected_type):
                 expected = (
                     ", ".join(t.__name__ for t in rule.expected_type)
@@ -74,6 +82,10 @@ class ReportIngestor:
                     else rule.expected_type.__name__
                 )
                 raise ReportValidationError(f"Field '{name}' must be of type {expected}")
+            if isinstance(value, float) and not math.isfinite(value):
+                # NaN compares False with everything and would slip past
+                # the range checks below.
+                raise ReportValidationError(f"Field '{name}' must be a finite number")
             if rule.minimum is not None and value < rule.minimum:
                 raise ReportValidationError(f"Field '{name}' must be >= {rule.minimum}")
             if rule.maximum is not None and value > rule.maximum:

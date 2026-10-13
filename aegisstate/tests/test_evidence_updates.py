@@ -1,8 +1,8 @@
 
 import unittest
 
-from engine import AegisState
-from evidence_updates import (
+from aegisstate.engine import AegisState
+from aegisstate.evidence_updates import (
     EvidenceUpdateError,
     TrustedEvidenceUpdater,
 )

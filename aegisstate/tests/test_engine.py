@@ -1,7 +1,7 @@
 
 import unittest
 
-from engine import AegisState
+from aegisstate.engine import AegisState
 
 
 class TestAegisStateDay5(unittest.TestCase):

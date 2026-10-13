@@ -1,7 +1,7 @@
 
 from time import perf_counter
 
-from engine import AegisState
+from aegisstate.engine import AegisState
 
 
 def build_chain(size=100):

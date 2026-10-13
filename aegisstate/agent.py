@@ -7,7 +7,7 @@ class Agent:
 
         decision = self.state.validate(action_name)
 
-        if not decision["allowed"]:
+        if not decision["valid"]:
             print(f"BLOCKED: {action_name}")
             print(f"Reason: {decision['reason']}")
 

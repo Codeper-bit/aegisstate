@@ -40,61 +40,91 @@ class AegisState:
         if depends_on in self.dependencies[item]:
             return
 
-        self.dependencies[item].add(depends_on)
-
-        if self._has_cycle():
-            self.dependencies[item].remove(depends_on)
-
+        # The new edge item -> depends_on closes a cycle only if
+        # depends_on already (transitively) depends on item.
+        if self._depends_on(depends_on, item):
             raise ValueError(
                 "Circular dependency detected"
             )
+
+        self.dependencies[item].add(depends_on)
 
         affected = {item} | self._descendants(item)
 
         self.invalidated.update(affected)
 
+    def _depends_on(self, start, target):
+        """True if `start` is `target` or transitively depends on it."""
+        pending = [start]
+        seen = set()
+
+        while pending:
+            current = pending.pop()
+
+            if current == target:
+                return True
+
+            if current in seen:
+                continue
+
+            seen.add(current)
+            pending.extend(self.dependencies.get(current, ()))
+
+        return False
+
     def _has_cycle(self):
-        visiting = set()
-        visited = set()
+        """Iterative cycle check (no recursion limit)."""
+        WHITE, GREY, BLACK = 0, 1, 2
+        colour = {item: WHITE for item in self.dependencies}
 
-        def visit(item):
-            if item in visiting:
-                return True
+        for root in self.dependencies:
+            if colour[root] != WHITE:
+                continue
 
-            if item in visited:
-                return False
+            colour[root] = GREY
+            stack = [(root, iter(self.dependencies[root]))]
 
-            visiting.add(item)
+            while stack:
+                node, children = stack[-1]
 
-            for dependency in self.dependencies.get(
-                item, set()
-            ):
-                if visit(dependency):
-                    return True
+                for child in children:
+                    state = colour.get(child, BLACK)
 
-            visiting.remove(item)
-            visited.add(item)
+                    if state == GREY:
+                        return True
 
-            return False
-
-        for item in self.dependencies:
-            if item not in visited and visit(item):
-                return True
+                    if state == WHITE:
+                        colour[child] = GREY
+                        stack.append(
+                            (child, iter(self.dependencies[child]))
+                        )
+                        break
+                else:
+                    colour[node] = BLACK
+                    stack.pop()
 
         return False
 
     def _descendants(self, changed_item):
+        """Every item that directly or indirectly depends on the item.
+
+        Builds the reverse edge map once (O(items + edges)) instead of
+        rescanning the whole graph for every node visited.
+        """
+        dependents = {}
+
+        for item, dependencies in self.dependencies.items():
+            for dependency in dependencies:
+                dependents.setdefault(dependency, []).append(item)
+
         affected = set()
         pending = [changed_item]
 
         while pending:
             current = pending.pop()
 
-            for item, dependencies in self.dependencies.items():
-                if (
-                    current in dependencies
-                    and item not in affected
-                ):
+            for item in dependents.get(current, ()):
+                if item not in affected:
                     affected.add(item)
                     pending.append(item)
 
@@ -135,7 +165,7 @@ class AegisState:
         was calculated correctly.
         """
 
-        if item not in self.dependencies:
+        if not isinstance(item, str) or item not in self.dependencies:
             return {
                 "committed": False,
                 "reason": "Unknown item"
@@ -171,6 +201,14 @@ class AegisState:
         # Store a copy so later changes to a mutable object
         # supplied by the caller do not silently change
         # the recorded result.
+        # If this item already had a different result, anything built on
+        # the old result is now stale even though no evidence version
+        # changed.
+        previous_result = self.results.get(item)
+        result_changed = (
+            item in self.results and previous_result != result
+        )
+
         self.results[item] = deepcopy(result)
 
         self.provenance[item] = {
@@ -179,6 +217,9 @@ class AegisState:
         }
 
         self.invalidated.discard(item)
+
+        if result_changed:
+            self.invalidated.update(self._descendants(item))
 
         return {
             "committed": True,
@@ -190,24 +231,58 @@ class AegisState:
         }
 
     def validate(self, item):
-        if item not in self.dependencies:
+        if not isinstance(item, str) or item not in self.dependencies:
             return {
                 "valid": False,
                 "reason": "Unknown item"
             }
 
-        if item in self.invalidated:
+        # Iterative post-order walk with memoisation: no RecursionError on
+        # deep chains and no repeated work on diamond-shaped graphs.
+        status = {}
+        in_progress = set()
+        stack = [(item, False)]
+
+        while stack:
+            node, children_done = stack.pop()
+
+            if node in status:
+                continue
+
+            if not children_done:
+                if node in in_progress:
+                    status[node] = {
+                        "valid": False,
+                        "reason": "Circular dependency detected"
+                    }
+                    continue
+
+                in_progress.add(node)
+                stack.append((node, True))
+
+                for dependency in self.dependencies[node]:
+                    if dependency not in status:
+                        stack.append((dependency, False))
+
+                continue
+
+            in_progress.discard(node)
+            status[node] = self._check_node(node, status)
+
+        return status[item]
+
+    def _check_node(self, node, status):
+        """Validate one node given the status of its dependencies."""
+        if node in self.invalidated:
             return {
                 "valid": False,
                 "reason": "Decision invalidated"
             }
 
-        dependencies = self.dependencies[item]
+        dependencies = self.dependencies[node]
 
         for dependency in sorted(dependencies):
-            validation = self.validate(dependency)
-
-            if not validation["valid"]:
+            if not status[dependency]["valid"]:
                 return {
                     "valid": False,
                     "reason": (
@@ -217,20 +292,18 @@ class AegisState:
                 }
 
         # An item with dependencies needs a committed result.
-        if dependencies and item not in self.provenance:
+        if dependencies and node not in self.provenance:
             return {
                 "valid": False,
                 "reason": "Missing decision provenance"
             }
 
         if dependencies:
-            record = self.provenance[item]
-
-            recorded_versions = record[
+            recorded_versions = self.provenance[node][
                 "dependency_versions"
             ]
 
-            for dependency in dependencies:
+            for dependency in sorted(dependencies):
                 if (
                     recorded_versions.get(dependency)
                     != self.versions[dependency]
