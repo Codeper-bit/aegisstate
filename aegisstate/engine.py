@@ -1,14 +1,34 @@
+import threading
 from copy import deepcopy
+from functools import wraps
+
+
+def _locked(method):
+    """Run a public method while holding the instance lock.
+
+    Without it, concurrent callers crash with ``RuntimeError: dictionary
+    changed size during iteration`` and can interleave a version change
+    between a validation and the commit that depends on it.
+    """
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class AegisState:
     def __init__(self):
+        self._lock = threading.RLock()
         self.dependencies = {}
         self.versions = {}
         self.invalidated = set()
         self.provenance = {}
         self.results = {}
 
+    @_locked
     def add_item(self, item, version=1):
         if not isinstance(item, str) or not item:
             raise ValueError(
@@ -28,6 +48,7 @@ class AegisState:
             self.dependencies[item] = set()
             self.versions[item] = version
 
+    @_locked
     def add_dependency(self, item, depends_on):
         if item == depends_on:
             raise ValueError(
@@ -130,6 +151,7 @@ class AegisState:
 
         return affected
 
+    @_locked
     def set_version(self, item, version):
         if (
             not isinstance(version, int)
@@ -153,6 +175,7 @@ class AegisState:
 
         return sorted(affected)
 
+    @_locked
     def commit_decision(self, item, result):
         """
         Commit a newly calculated decision.
@@ -230,6 +253,7 @@ class AegisState:
             )
         }
 
+    @_locked
     def validate(self, item):
         if not isinstance(item, str) or item not in self.dependencies:
             return {
@@ -321,6 +345,7 @@ class AegisState:
             "reason": "Decision is valid"
         }
 
+    @_locked
     def snapshot(self):
         return {
             "versions": dict(self.versions),
@@ -333,3 +358,13 @@ class AegisState:
             "provenance": deepcopy(self.provenance),
             "results": deepcopy(self.results)
         }
+
+    # Locks cannot be copied or pickled; recreate one on the new instance.
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state["_lock"]
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.RLock()

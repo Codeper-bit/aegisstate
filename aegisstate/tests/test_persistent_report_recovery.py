@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from engine import AegisState
+from aegisstate.engine import AegisState
 from aegisstate.report_ingestion import ReportValidationError
 from aegisstate.report_security import ReplayProtectedReportBridge
 from aegisstate.replay_store import SQLiteReplayStore

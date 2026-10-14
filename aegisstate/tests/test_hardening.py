@@ -15,6 +15,9 @@ from aegisstate.report_security import (
 )
 
 
+ALLOW_D = {"risk_assessment": {"d"}}
+
+
 class TestEngineRobustness(unittest.TestCase):
 
     def test_very_deep_chain_does_not_hit_recursion_limit(self):
@@ -158,7 +161,9 @@ class TestIngestionAndBridge(unittest.TestCase):
         state.add_item("e")
         state.add_item("other")
         state.add_dependency("d", "e")
-        bridge = ReportBridge(state)
+        bridge = ReportBridge(
+            state, allowed_decisions={"risk_assessment": {"d"}}
+        )
         with self.assertRaises(ReportValidationError):
             bridge.process_report(self.report(evidence_id="other"))
         self.assertTrue(bridge.process_report(self.report())["committed"])
@@ -184,16 +189,20 @@ class TestReplayProtection(unittest.TestCase):
 
     def test_sqlite_backed_bridge_blocks_replay_across_instances(self):
         store = SQLiteReplayStore(":memory:")
-        first = ReplayProtectedReportBridge(self.make_state(), store)
+        first = ReplayProtectedReportBridge(
+            self.make_state(), store, ALLOW_D)
         self.assertTrue(first.process_report(self.report("r1"))["committed"])
 
-        second = ReplayProtectedReportBridge(self.make_state(), store)
+        second = ReplayProtectedReportBridge(
+            self.make_state(), store, ALLOW_D)
         with self.assertRaises(ReportReplayError):
             second.process_report(self.report("r1"))
         store.close()
 
     def test_failed_reports_release_their_id(self):
-        bridge = ReplayProtectedReportBridge(self.make_state())
+        bridge = ReplayProtectedReportBridge(
+            self.make_state(), allowed_decisions=ALLOW_D
+        )
         bad = self.report("r2")
         bad["evidence_version"] = 9
         with self.assertRaises(ValueError):
@@ -201,7 +210,9 @@ class TestReplayProtection(unittest.TestCase):
         self.assertTrue(bridge.process_report(self.report("r2"))["committed"])
 
     def test_non_mapping_rejected(self):
-        bridge = ReplayProtectedReportBridge(self.make_state())
+        bridge = ReplayProtectedReportBridge(
+            self.make_state(), allowed_decisions=ALLOW_D
+        )
         with self.assertRaises(ReportReplayError):
             bridge.process_report("not a report")
 

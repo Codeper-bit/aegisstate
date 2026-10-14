@@ -8,6 +8,12 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
+# Bounds on attacker-controlled input. An unbounded int also breaks error
+# messages (Python refuses to print integers beyond ~4300 digits).
+MAX_ID_LENGTH = 256
+MAX_VERSION = 2**63 - 1
+
+
 class ReportValidationError(ValueError):
     """Raised when a report does not satisfy its registered schema."""
 
@@ -18,6 +24,7 @@ class FieldRule:
     required: bool = True
     minimum: float | None = None
     maximum: float | None = None
+    max_length: int | None = None  # for str fields
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,12 @@ class ReportIngestor:
                 # NaN compares False with everything and would slip past
                 # the range checks below.
                 raise ReportValidationError(f"Field '{name}' must be a finite number")
+            if (
+                rule.max_length is not None
+                and isinstance(value, str)
+                and len(value) > rule.max_length
+            ):
+                raise ReportValidationError(f"Field '{name}' must be at most {rule.max_length} characters")
             if rule.minimum is not None and value < rule.minimum:
                 raise ReportValidationError(f"Field '{name}' must be >= {rule.minimum}")
             if rule.maximum is not None and value > rule.maximum:
@@ -109,9 +122,9 @@ def create_default_ingestor() -> ReportIngestor:
         ReportSchema(
             report_type="risk_assessment",
             fields={
-                "decision_id": FieldRule(str),
-                "evidence_id": FieldRule(str),
-                "evidence_version": FieldRule(int, minimum=1),
+                "decision_id": FieldRule(str, max_length=MAX_ID_LENGTH),
+                "evidence_id": FieldRule(str, max_length=MAX_ID_LENGTH),
+                "evidence_version": FieldRule(int, minimum=1, maximum=MAX_VERSION),
                 "risk_score": FieldRule((int, float), minimum=0, maximum=100),
             },
         )
@@ -120,9 +133,9 @@ def create_default_ingestor() -> ReportIngestor:
         ReportSchema(
             report_type="approval",
             fields={
-                "decision_id": FieldRule(str),
-                "evidence_id": FieldRule(str),
-                "evidence_version": FieldRule(int, minimum=1),
+                "decision_id": FieldRule(str, max_length=MAX_ID_LENGTH),
+                "evidence_id": FieldRule(str, max_length=MAX_ID_LENGTH),
+                "evidence_version": FieldRule(int, minimum=1, maximum=MAX_VERSION),
                 "approved": FieldRule(bool),
                 "risk_score": FieldRule((int, float), required=False, minimum=0, maximum=100),
             },

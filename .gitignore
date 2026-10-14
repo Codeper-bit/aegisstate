@@ -47,3 +47,9 @@ npm-debug.log*
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Replay databases hold report IDs; never commit them
+*.sqlite3
+*.sqlite3-journal
+*.sqlite
+*.db

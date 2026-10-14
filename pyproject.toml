@@ -9,6 +9,10 @@ version = "0.1.0"
 description = "Dependency-aware temporal integrity for AI-agent decisions"
 readme = "Readme.md"
 requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dashboard = ["streamlit>=1.30"]
 
 [tool.setuptools]
 packages = ["aegisstate"]

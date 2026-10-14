@@ -1,4 +1,6 @@
 
+import math
+
 from aegisstate.engine import AegisState
 from aegisstate.executor import ProtectedExecutor
 
@@ -10,6 +12,13 @@ def read_transaction(label):
     while True:
         try:
             amount = float(input("Transaction amount: "))
+
+            # float() accepts "nan" and "inf". NaN is False for every
+            # comparison, so it would skip all risk thresholds and receive
+            # the lowest risk score (auto-approval).
+            if not math.isfinite(amount):
+                print("Enter a finite number.")
+                continue
 
             if amount < 0:
                 print("Amount cannot be negative.")
@@ -149,4 +158,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (EOFError, KeyboardInterrupt):
+        print("\nInput ended; exiting.")

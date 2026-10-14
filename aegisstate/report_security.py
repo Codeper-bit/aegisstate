@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from .replay_store import InMemoryReplayStore
+from .replay_store import InMemoryReplayStore, validate_report_id
 from .report_bridge import ReportBridge
 
 
@@ -18,10 +18,18 @@ class ReplayProtectedReportBridge:
 
     By default replay history lives in memory for this process only; pass a
     SQLiteReplayStore to make it survive restarts.
+
+    Security note: replay protection is only as strong as the authenticity
+    of the report_id. Reports (including their ID) should be authenticated
+    upstream, for example with an HMAC or signature, before reaching here.
     """
 
-    def __init__(self, state, replay_store=None):
-        self.bridge = ReportBridge(state)
+    def __init__(
+        self, state, replay_store=None, allowed_decisions=None
+    ):
+        self.bridge = ReportBridge(
+            state, allowed_decisions=allowed_decisions
+        )
         self.replay_store = (
             replay_store
             if replay_store is not None
@@ -32,12 +40,17 @@ class ReplayProtectedReportBridge:
         if not isinstance(report, Mapping):
             raise ReportReplayError("Report must be a mapping.")
 
-        report_id = report.get("report_id")
+        # Work on one private snapshot so the ID that is reserved is
+        # exactly the ID that is processed, even if the caller's object
+        # is mutated from another thread in the meantime.
+        report = dict(report)
 
-        if not isinstance(report_id, str) or not report_id.strip():
+        try:
+            report_id = validate_report_id(report.get("report_id"))
+        except ValueError as exc:
             raise ReportReplayError(
-                "A non-empty report_id is required."
-            )
+                f"A valid report_id is required. {exc}"
+            ) from None
 
         if not self.replay_store.reserve(report_id):
             raise ReportReplayError(

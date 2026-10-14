@@ -10,9 +10,30 @@ class StaleEvidenceError(ValueError):
 
 
 class ReportBridge:
-    def __init__(self, state):
+    """Validates agent reports and commits them to an AegisState.
+
+    ``allowed_decisions`` maps each report_type to the decision IDs that
+    report type may commit, e.g. ``{"approval": {"approval"}}``. By default
+    a report may only commit the decision named after its own report_type.
+    Without this restriction any agent could, for instance, submit a
+    risk_assessment report that commits ``agent_action`` and thereby skip
+    the approval step entirely.
+    """
+
+    def __init__(self, state, allowed_decisions=None):
         self.state = state
         self.ingestor = create_default_ingestor()
+        self.allowed_decisions = {}
+
+        for report_type, decisions in (allowed_decisions or {}).items():
+            if isinstance(decisions, str):
+                decisions = {decisions}
+            self.allowed_decisions[report_type] = frozenset(decisions)
+
+    def _decisions_allowed_for(self, report_type):
+        return self.allowed_decisions.get(
+            report_type, frozenset({report_type})
+        )
 
     def process_report(self, report):
         validated = self.ingestor.validate(report)
@@ -21,6 +42,14 @@ class ReportBridge:
         decision_id = data["decision_id"]
         evidence_id = data["evidence_id"]
         reported_version = data["evidence_version"]
+
+        if decision_id not in self._decisions_allowed_for(
+            validated.report_type
+        ):
+            raise ReportValidationError(
+                f"Report type '{validated.report_type}' is not "
+                f"allowed to commit decision '{decision_id}'"
+            )
 
         if decision_id not in self.state.versions:
             raise ReportValidationError(

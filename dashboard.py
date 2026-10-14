@@ -42,6 +42,16 @@ def create_system():
     return state, executor
 
 
+MAX_HISTORY = 200
+
+
+def add_history(message):
+    """Append to the session history, keeping it bounded so a long-lived
+    browser session cannot grow server memory indefinitely."""
+    st.session_state.history.append(message)
+    del st.session_state.history[:-MAX_HISTORY]
+
+
 def calculate_risk(amount, status):
     if status != "pending":
         return 100
@@ -155,11 +165,11 @@ if st.sidebar.button("Apply evidence change", type="primary"):
         state.set_version("transaction", st.session_state.evidence_version)
         commit_transaction(state, new_amount, new_status)
 
-        st.session_state.history.append(
+        add_history(
             f"Evidence changed to version {st.session_state.evidence_version}"
         )
     else:
-        st.session_state.history.append("No evidence change detected.")
+        add_history("No evidence change detected.")
 
     st.rerun()
 
@@ -254,7 +264,7 @@ if st.button("Recompute decisions"):
     )
 
     if success:
-        st.session_state.history.append(
+        add_history(
             f"Decisions recomputed at evidence version "
             f"{st.session_state.evidence_version}"
         )
