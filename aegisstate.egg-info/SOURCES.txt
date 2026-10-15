@@ -1,3 +1,4 @@
+LICENSE.txt
 Readme.md
 pyproject.toml
 aegisstate/__init__.py

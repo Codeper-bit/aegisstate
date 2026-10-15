@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,6 +9,7 @@ description = "Dependency-aware temporal integrity for AI-agent decisions"
 readme = "Readme.md"
 requires-python = ">=3.10"
 license = "MIT"
+license-files = ["LICENSE.txt"]
 dependencies = []
 keywords = [
 "ai-agents",
@@ -20,7 +21,6 @@ keywords = [
 classifiers = [
 "Development Status :: 3 - Alpha",
 "Intended Audience :: Developers",
-"License :: OSI Approved :: MIT License",
 "Operating System :: OS Independent",
 "Programming Language :: Python :: 3",
 "Programming Language :: Python :: 3.10",
