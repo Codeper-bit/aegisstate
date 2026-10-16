@@ -1,161 +1,58 @@
-AegisState
+# AegisState
 
-Dependency-aware temporal integrity for AI-agent decisions.
+**Dependency-aware temporal integrity for AI-agent decisions.**
 
-AegisState is a Python library designed to help AI-agent systems detect when previously recorded decisions may no longer be safe to rely on because the evidence or upstream decisions they depend on have changed.
+[![PyPI](https://img.shields.io/pypi/v/aegisstate.svg)](https://pypi.org/project/aegisstate/)
+[![Python](https://img.shields.io/pypi/pyversions/aegisstate.svg)](https://pypi.org/project/aegisstate/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Codeper-bit/aegisstate/blob/main/LICENSE.txt)
+![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
 
-In an agentic system, a decision is not always valid forever. A risk assessment may depend on transaction data. An approval may depend on that assessment. An agent action may depend on the approval. If the underlying transaction changes, continuing to rely on the old approval can create a consistency and safety problem.
+AI agents make decisions from evidence, and evidence changes. AegisState tracks which decisions rest on which evidence, invalidates only the decisions affected when that evidence changes, and blocks protected actions that still rely on a stale decision.
 
-AegisState provides a way to represent these relationships, track changes, invalidate affected downstream decisions, and guard actions that require valid decisions.
-
-Its central principle is simple:
-
-«A decision should not be treated as current merely because it was valid when it was first made. Its dependencies must still support its use.»
-
----
-
-Table of Contents
-
-- "The Problem" (#the-problem)
-- "What AegisState Does" (#what-aegisstate-does)
-- "How It Works" (#how-it-works)
-- "Core Capabilities" (#core-capabilities)
-- "Installation" (#installation)
-- "Quick Start" (#quick-start)
-- "Working with Evidence Updates" (#working-with-evidence-updates)
-- "Reports and Replay Protection" (#reports-and-replay-protection)
-- "Dashboard" (#dashboard)
-- "Testing" (#testing)
-- "Design Principles" (#design-principles)
-- "Security Model and Limitations" (#security-model-and-limitations)
-- "Intended Use Cases" (#intended-use-cases)
-- "License" (#license)
+> A decision should not be treated as current merely because it was valid when it was made. Its dependencies must still support its use.
 
 ---
 
-The Problem
+## The problem
 
-AI agents increasingly operate through multi-step workflows. They retrieve information, evaluate conditions, produce decisions, and trigger actions through tools or external systems.
+Consider a payment workflow run by agents:
 
-These workflows introduce a temporal consistency problem: information can change after a decision has been made, while downstream components may continue using the earlier result.
+1. An agent receives a transaction.
+2. A risk assessment is produced from it.
+3. An approval is recorded from the assessment.
+4. An agent acts on the approval.
+5. **The transaction changes.**
 
-Consider a transaction approval workflow:
+The assessment and approval were reasonable when made, but they describe a transaction that no longer exists. Unless every component re-implements its own staleness checks, the agent acts on outdated reasoning.
 
-1. An agent receives transaction evidence.
-2. A risk assessment is produced using that evidence.
-3. An approval decision is recorded using the assessment.
-4. An agent attempts an action that requires the approval.
-5. The original transaction evidence changes.
+AegisState makes those dependencies explicit and enforces them at the one place that matters: right before an action runs.
 
-The earlier assessment and approval may now be stale. Even if they were reasonable when created, their original inputs no longer represent the current state.
+## Features
 
-Without explicit dependency tracking, an application may continue using those decisions unless each component independently implements suitable invalidation and validation logic.
+- **Dependency graph.** Declare which items depend on which, with cycle detection.
+- **Targeted invalidation.** A change invalidates its downstream decisions only. Unrelated decisions stay valid.
+- **Protected execution.** `ProtectedExecutor` runs an action only while its required decision is valid, and logs every outcome.
+- **Provenance.** Each committed decision records the dependency versions it was built on.
+- **Report ingestion.** Schema-validated agent reports, with evidence-version checks and an allow-list of decisions each report type may commit.
+- **Replay protection.** Duplicate report IDs are rejected, using an in-memory or SQLite-backed store with crash recovery.
+- **Thread-safe, zero dependencies.** Pure standard library, Python 3.10+.
 
-AegisState addresses this problem by making decision dependencies explicit and checking their validity before protected actions are allowed.
+## Installation
 
-What AegisState Does
+```bash
+pip install aegisstate
+```
 
-AegisState maintains relationships between items such as evidence, assessments, approvals, and agent decisions.
+The optional Streamlit dashboard lives in the source repository (see [Dashboard](#dashboard)).
 
-When an item's recorded version changes, dependent decisions can become invalid. Unrelated decisions can remain valid when their own dependencies have not changed.
+## Quick start
 
-A protected executor can then check whether the decision required by an action remains valid before allowing the action to proceed.
-
-AegisState is a decision-integrity component, not an AI model, agent framework, database of record, or substitute for domain-specific authorization.
-
-It is designed to work alongside application logic that produces evidence and decisions.
-
-How It Works
-
-1. Represent the dependency graph
-
-Each tracked item represents something whose state matters to a workflow. Dependencies express which upstream items a downstream item relies on.
-
-For example:
-
-"transaction → risk assessment → approval → agent action"
-
-This graph makes the relationships between evidence and decisions explicit rather than leaving them implicit in application code.
-
-2. Track versions
-
-Tracked items have versions. A version identifies the revision of an item that downstream logic currently relies on.
-
-When relevant evidence changes, its version can be updated. AegisState uses the dependency relationships and version information to determine whether affected decisions remain valid.
-
-3. Invalidate stale decisions
-
-A change to an upstream item can invalidate dependent decisions. Validation checks whether a decision can still be relied upon under the current tracked state.
-
-This helps prevent the application from treating an old result as automatically current.
-
-4. Preserve unrelated decisions
-
-Not every change should invalidate every decision. If an inventory report changes but a transaction approval does not depend on that report, the unrelated approval need not be invalidated by that change.
-
-Dependency-aware invalidation is more targeted than globally marking every decision stale whenever any data changes.
-
-5. Guard protected actions
-
-"ProtectedExecutor" checks a required decision before running an action routed through it. If the required decision is invalid, execution is blocked.
-
-This creates an enforcement point between decision-making and action execution.
-
-The application must actually route sensitive actions through the protected executor for this safeguard to apply.
-
----
-
-Core Capabilities
-
-Capability| Purpose
-Dependency tracking| Represent relationships between evidence and decisions.
-Version management| Track revisions of items used by a workflow.
-Decision validation| Determine whether tracked decisions remain valid.
-Downstream invalidation| Identify decisions affected by upstream changes.
-Protected execution| Block actions whose required decisions are invalid.
-Report ingestion| Validate incoming report structure and expected fields.
-Evidence-version checks| Reject reports that claim to use an outdated evidence version.
-Replay protection| Prevent successfully processed report identifiers from being accepted repeatedly.
-Replay persistence| Use an in-memory or SQLite-backed replay store, depending on application requirements.
-Dashboard| Explore the workflow through a local visual interface available in the source project.
-
-These capabilities provide application-level controls. Their guarantees depend on correct dependency configuration, reliable evidence updates, and proper integration into the surrounding system.
-
-Installation
-
-Install from PyPI
-
-Once the package is published, install the core library with:
-
-python -m pip install aegisstate
-
-AegisState supports Python 3.10 and newer.
-
-Install from the source project
-
-For development, testing, or access to the source examples and dashboard, navigate to the project root and run:
-
-python -m pip install -e .
-
-The editable installation makes the local package importable while you work on the source code.
-
-Install dashboard dependencies
-
-The dashboard is optional. Install its dependency with:
-
-python -m pip install -e ".[dashboard]"
-
-Run this command from the source project root.
-
-Quick Start
-
-The following example demonstrates the core dependency-validation workflow.
-
+```python
 from aegisstate import AegisState
 
 state = AegisState()
 
-# Register evidence and downstream decisions.
+# Register evidence and the decisions built on it.
 state.add_item("transaction", version=1)
 state.add_item("risk_assessment", version=1)
 state.add_item("approval", version=1)
@@ -164,177 +61,186 @@ state.add_item("approval", version=1)
 state.add_dependency("risk_assessment", "transaction")
 state.add_dependency("approval", "risk_assessment")
 
-# Record decisions produced by your application.
-state.commit_decision(
-    "risk_assessment",
-    {"risk_score": 0.2}
-)
+# Record decisions produced by your application or agent.
+state.commit_decision("risk_assessment", {"risk_score": 0.2})
+state.commit_decision("approval", {"approved": True})
 
-state.commit_decision(
-    "approval",
-    {"approved": True}
-)
-
-# Both decisions should be valid while their dependencies
-# remain consistent with the tracked state.
-print(state.validate("risk_assessment"))
 print(state.validate("approval"))
+# {'valid': True, 'reason': 'Decision is valid'}
 
-# A new transaction version changes the tracked state.
+# The underlying evidence changes.
 state.set_version("transaction", 2)
 
-# The risk assessment and its downstream approval must
-# no longer be relied upon as current.
 print(state.validate("risk_assessment"))
+# {'valid': False, 'reason': 'Decision invalidated'}
 print(state.validate("approval"))
+# {'valid': False, 'reason': 'Decision invalidated'}
+```
 
-Understanding the example
+`set_version` returns the sorted list of items it invalidated. AegisState does not compute risk scores or decide whether to approve anything. Your application produces the decisions; AegisState tells you whether they can still be trusted.
 
-The example registers three items and establishes their dependency relationships.
+## Guarding actions
 
-The risk assessment depends on the transaction. The approval depends on the risk assessment. Updating the transaction version therefore affects the validity of the downstream decision chain.
+Route sensitive actions through `ProtectedExecutor`. If the required decision is invalid, the action never runs.
 
-The dictionaries passed to "commit_decision" are illustrative application results. AegisState does not calculate the risk score, independently verify the transaction, or decide whether approval is appropriate.
+```python
+from aegisstate import AegisState, ProtectedExecutor
 
-In a real integration, your application or agent would produce those results using its own business rules, models, and trusted evidence sources.
+state = AegisState()
+executor = ProtectedExecutor(state)
 
-Important: This example illustrates the core API and dependency flow. Before relying on it in production, run it against the installed release and confirm that the returned validation results match your expected workflow.
+for item in ["transaction", "risk_assessment", "approval", "agent_action"]:
+    state.add_item(item)
 
-Working with Evidence Updates
+state.add_dependency("risk_assessment", "transaction")
+state.add_dependency("approval", "risk_assessment")
+state.add_dependency("agent_action", "approval")
 
-Evidence changes should be handled deliberately.
+state.commit_decision("transaction", {"amount": 1000})
+state.commit_decision("risk_assessment", {"risk_score": 20})
+state.commit_decision("approval", {"approved": True})
+state.commit_decision("agent_action", {"action": "pay"})
 
-AegisState exposes version updates through "set_version". The project also provides a "TrustedEvidenceUpdater" helper for coordinating evidence-version changes.
+print(executor.execute("process_payment", "agent_action", lambda: "paid"))
+# {'executed': True, 'action': 'process_payment', 'result': 'paid'}
 
-A typical workflow is:
+state.set_version("transaction", 2)   # evidence changed
 
-1. Receive updated evidence from an authorized source.
-2. Validate the update according to the application's domain rules.
-3. Update the tracked evidence version.
-4. Validate affected decisions.
-5. Recompute decisions that are no longer valid.
-6. Permit an action only after its required decision has been validated.
+print(executor.execute("process_payment", "agent_action", lambda: "paid"))
+# {'executed': False, 'action': 'process_payment', 'reason': 'Decision invalidated'}
+```
 
-The source of evidence and the code authorized to update versions are important parts of the system's trust model. A version increment does not establish that the underlying evidence is authentic or correct.
+To recover, recommit the decisions **upstream to downstream** (`risk_assessment`, then `approval`, then `agent_action`). Each one becomes valid again once its own dependencies are current, and the action is permitted again.
 
-Reports and Replay Protection
+The execution log (`executor.get_execution_log()`) is bounded and omits action results by default, so long-running processes do not leak memory or retain sensitive output.
 
-Agentic systems may produce reports asynchronously or deliver the same report more than once. Reports may also refer to evidence versions that have changed since the report was created.
+## API overview
 
-AegisState includes components for handling these situations.
+| Method | Purpose |
+| --- | --- |
+| `add_item(item, version=1)` | Register an evidence item or decision. |
+| `add_dependency(item, depends_on)` | Declare that `item` relies on `depends_on`. Raises `ValueError` on self-dependency or cycles. |
+| `set_version(item, version)` | Record a new evidence version. Invalidates downstream decisions and returns their names. |
+| `commit_decision(item, result)` | Record a decision and its provenance. Returns a dict with a `committed` flag. |
+| `validate(item)` | Returns `{"valid": bool, "reason": str}`. |
+| `snapshot()` | Returns a copy of versions, dependencies, invalidations, provenance and results. |
+| `ProtectedExecutor.execute(name, decision, fn)` | Run `fn` only if `decision` is valid. |
 
-Report validation
+## Trusted evidence updates
 
-The report-ingestion layer supports schema-based checks, including expected fields and data types. The report bridge can check that referenced decisions and evidence exist and that a report's claimed evidence version matches the currently tracked version.
+Evidence versions should advance under the application's control, not the agent's. `TrustedEvidenceUpdater` increments an existing evidence item's version and triggers downstream invalidation:
 
-These checks help reject malformed reports and reports that refer to outdated evidence.
+```python
+from aegisstate.evidence_updates import TrustedEvidenceUpdater
 
-They do not prove that an agent actually examined the evidence, performed the required analysis, or reported the truth.
+updater = TrustedEvidenceUpdater(state)
+updater.update_evidence("transaction")
+# {'evidence_id': 'transaction', 'previous_version': 1,
+#  'current_version': 2, 'updated': True}
+```
 
-Replay protection
+Only trusted application code should call it. A version bump does not prove the new evidence is authentic.
 
-"ReplayProtectedReportBridge" works with a replay store to track report identifiers and their processing status.
+## Agent reports and replay protection
 
-The project includes:
+Agents often report asynchronously and may deliver the same report twice. `ReplayProtectedReportBridge` validates each report, checks that it cites a current evidence version, and rejects duplicates.
 
-- "InMemoryReplayStore" for non-persistent, process-local use.
-- "SQLiteReplayStore" for storing replay records in SQLite.
+```python
+from aegisstate import AegisState
+from aegisstate.report_security import ReplayProtectedReportBridge
+from aegisstate.replay_store import SQLiteReplayStore
 
-The persistent store is useful when replay records need to survive ordinary process restarts. Its operational limitations, recovery behavior, and deployment requirements should be considered when choosing a storage strategy.
+state = AegisState()
+state.add_item("transaction")
+state.add_item("risk_assessment")
+state.add_dependency("risk_assessment", "transaction")
 
-Replay protection is not a replacement for authentication, authorization, transport security, or durable transaction processing. In particular, report processing and decision commits are not guaranteed to form one atomic transaction across all failure scenarios.
+bridge = ReplayProtectedReportBridge(
+    state, replay_store=SQLiteReplayStore("replay.db")
+)
 
-Dashboard
+report = {
+    "report_type": "risk_assessment",
+    "report_id": "r-001",
+    "decision_id": "risk_assessment",
+    "evidence_id": "transaction",
+    "evidence_version": 1,
+    "risk_score": 20,
+}
 
-The source project includes a Streamlit dashboard for exploring AegisState workflows.
+bridge.process_report(report)   # committed
+bridge.process_report(report)   # ReportReplayError: Report already processed: r-001
 
-From the project root, install the optional dashboard dependency and run:
+state.set_version("transaction", 2)
+report["report_id"] = "r-002"
+bridge.process_report(report)   # StaleEvidenceError: Report version 1 is outdated
+```
 
-python -m pip install -e ".[dashboard]"
+What the bridge enforces:
+
+- **Schema validation:** required fields, types, ranges and length limits.
+- **Allow-list of commits:** by default a report may commit only the decision named after its own `report_type`, so a `risk_assessment` report cannot commit `agent_action` and skip the approval step. Widen this with `allowed_decisions`.
+- **Dependency check:** the evidence a report cites must actually be a dependency of the decision it commits.
+- **Evidence freshness:** the report's evidence version must match the current version.
+- **Reserve-before-process replay IDs:** concurrent duplicates cannot both pass, and a failed report releases its ID so a corrected one can be retried.
+
+`InMemoryReplayStore` is process-local. `SQLiteReplayStore` survives restarts, and supports recovering reports abandoned by a crash.
+
+## Performance
+
+On a 100-decision dependency chain, validating the final decision averaged about **0.11 ms**, and invalidating the entire chain from its root took about **0.07 ms**. These figures were measured on a development sandbox, so run the benchmark on your own hardware:
+
+```bash
+python -m aegisstate.benchmark
+```
+
+## Security model and limitations
+
+AegisState strengthens the integrity of decision-dependent workflows. It is **not** a complete security boundary.
+
+**What it helps with**
+
+- Detecting that tracked decisions are stale after relevant version changes.
+- Leaving unrelated decisions valid.
+- Blocking actions routed through `ProtectedExecutor` when their decision is invalid.
+- Rejecting malformed, out-of-policy, stale and duplicate reports.
+
+**What it does not guarantee**
+
+- That evidence is authentic or accurate, or that an agent reasoned correctly or actually used the evidence it cites.
+- That every action is protected. Code paths that bypass the executor are outside its control.
+- That validation and the external side effect are atomic. A decision can go stale between the check and the action, so high-impact actions need their own coordination.
+- Authentication, authorization or transport security. Authenticate reports (for example with an HMAC or signature) *before* they reach the bridge, because replay protection is only as strong as the authenticity of the report ID.
+- Distributed coordination. Replay stores are single-node, and report processing and decision commits are not one atomic transaction across failures.
+
+Combine AegisState with authentication, trusted evidence ingestion, durable storage and domain-specific safety checks.
+
+## Dashboard
+
+A Streamlit dashboard for exploring dependency graphs, state changes and protected execution is included in the source repository (it is not part of the PyPI package):
+
+```bash
+git clone https://github.com/Codeper-bit/aegisstate.git
+cd aegisstate
+pip install -e ".[dashboard]"
 python -m streamlit run dashboard.py
+```
 
-The dashboard is intended to help developers inspect the example workflow, examine dependency relationships, observe state changes, and understand protected-execution behavior.
+It is a local development and demonstration tool, not a production monitoring service.
 
-It is a local development and demonstration interface. It does not automatically connect to an external agent, monitor a live production environment, or provide a production monitoring service.
+## Development
 
-Testing
-
-Run the test suite from the project root:
-
+```bash
+git clone https://github.com/Codeper-bit/aegisstate.git
+cd aegisstate
+pip install -e .
 python -m unittest discover -s aegisstate/tests -v
+```
 
-Tests are important for verifying dependency invalidation, decision validation, protected execution, report handling, and replay-store behavior.
+The suite (91 tests) covers dependency invalidation, validation, protected execution, report handling, replay stores and crash recovery, concurrency and input hardening. Examples are in [`examples/`](https://github.com/Codeper-bit/aegisstate/tree/main/examples).
 
-When modifying the package, run the relevant tests first and then run the complete suite before creating a release.
+Issues and pull requests are welcome at [github.com/Codeper-bit/aegisstate](https://github.com/Codeper-bit/aegisstate).
 
-For a release, also rebuild the distribution files and verify their metadata before uploading them.
+## License
 
-Design Principles
-
-Explicit dependencies
-
-Decisions should declare the tracked items they rely on. Correct dependency relationships are essential to meaningful invalidation.
-
-Targeted invalidation
-
-A change should affect decisions that depend on it, rather than indiscriminately invalidating unrelated workflows.
-
-Validation before action
-
-A decision's previous success is not sufficient reason to permit a new action. Protected actions should check the validity of their required decisions.
-
-Separation of responsibilities
-
-AegisState tracks state and decision dependencies. The surrounding application remains responsible for obtaining trustworthy evidence, evaluating that evidence, making domain-specific decisions, and controlling access to sensitive operations.
-
-Transparent limitations
-
-A dependency-integrity mechanism should clearly distinguish the guarantees it implements from guarantees that require other infrastructure.
-
-Security Model and Limitations
-
-AegisState is intended to strengthen the integrity of decision-dependent workflows. It should not be treated as a complete security boundary by itself.
-
-What it helps with
-
-- Detecting when tracked decisions are no longer valid after relevant version changes.
-- Preserving the validity of unrelated decisions when their dependencies remain unchanged.
-- Blocking actions routed through "ProtectedExecutor" when their required decisions are invalid.
-- Checking report structure and certain evidence-version claims.
-- Tracking previously processed report identifiers through a replay store.
-
-What it does not guarantee
-
-- That evidence from an external source is authentic, accurate, or trustworthy.
-- That an AI agent reasoned correctly or actually used the evidence it claims to have used.
-- That every application action is protected; unguarded execution paths remain outside the executor's control.
-- That state validation and an external side effect occur atomically.
-- That concurrent updates cannot create race conditions in an integration.
-- That report validation alone provides identity verification or access control.
-- That an in-memory replay store survives process termination.
-- That SQLite replay tracking alone provides distributed coordination or atomicity with decision commits.
-
-For production use, combine AegisState with appropriate authentication, authorization, input validation, trusted evidence ingestion, durable storage, concurrency controls, monitoring, and domain-specific safety checks.
-
-For high-impact actions, the application should also consider how to coordinate validation with the actual side effect so that a decision cannot become stale between checking it and executing the action.
-
-Intended Use Cases
-
-AegisState may be useful in systems where decisions depend on evolving evidence, including:
-
-- Multi-step AI-agent workflows.
-- Transaction and approval pipelines.
-- Risk assessment systems.
-- Tool-using agents that need decision checks before execution.
-- Asynchronous agent-report ingestion.
-- Applications that need to detect stale downstream decisions after upstream data changes.
-
-These are potential integration areas, not claims that AegisState independently supplies all the controls required for each domain.
-
-License
-
-AegisState is distributed under the MIT License. See the "LICENSE" file for the full license terms.
-
----
-
-AegisState — Keep decisions aligned with the evidence they depend on.
+Released under the [MIT License](https://github.com/Codeper-bit/aegisstate/blob/main/LICENSE.txt).
