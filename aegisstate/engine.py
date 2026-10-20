@@ -1,4 +1,5 @@
 import threading
+from contextlib import contextmanager
 from copy import deepcopy
 from functools import wraps
 
@@ -252,6 +253,17 @@ class AegisState:
                 self.provenance[item]
             )
         }
+
+    @contextmanager
+    def validation_guard(self, item):
+        """Hold the state lock while validating and using a decision.
+
+        Evidence updates through this AegisState instance are blocked until
+        the guarded operation exits. Keep guarded operations short; external
+        systems still need their own transactional safeguards.
+        """
+        with self._lock:
+            yield self.validate(item)
 
     @_locked
     def validate(self, item):
