@@ -1,9 +1,18 @@
 
 from datetime import datetime
+import platform
 
+import pandas as pd
 import streamlit as st
 
 from aegisstate import AegisState, ProtectedExecutor
+from aegisstate.benchmark import (
+    GRAPH_SIZES,
+    TRIALS,
+    VALIDATIONS_PER_TRIAL,
+    benchmark_validation,
+    benchmark_invalidation,
+)
 
 
 st.set_page_config(
@@ -20,19 +29,16 @@ st.markdown(
         background: #0b1120;
         color: #e5edf8;
     }
-
     [data-testid="stSidebar"] {
         background: #101a2b;
         border-right: 1px solid #26364d;
     }
-
     [data-testid="stMetric"] {
         background: #121e30;
         border: 1px solid #26364d;
         padding: 16px;
         border-radius: 12px;
     }
-
     .hero {
         background: linear-gradient(120deg, #14243a, #102c38);
         border: 1px solid #285267;
@@ -40,29 +46,21 @@ st.markdown(
         padding: 25px;
         margin-bottom: 20px;
     }
-
-    .hero small {
+    .hero small, .section-label {
         color: #50d6c2;
-        letter-spacing: 2px;
+        letter-spacing: 1.5px;
         font-weight: bold;
     }
-
     .hero h1 {
         color: #f3f7ff;
         margin-bottom: 8px;
     }
-
     .hero p, .muted {
         color: #a6b7ce;
     }
-
     .section-label {
-        color: #50d6c2;
         font-size: 12px;
-        letter-spacing: 1.5px;
-        font-weight: bold;
     }
-
     .node {
         background: #121e30;
         border: 1px solid #2a3d56;
@@ -70,30 +68,24 @@ st.markdown(
         padding: 14px;
         margin: 5px 0;
     }
-
     .valid {
         border-left: 4px solid #32c995;
     }
-
     .stale {
         border-left: 4px solid #ff6577;
     }
-
     .denied {
         border-left: 4px solid #ffbd59;
     }
-
     .node-title {
         font-weight: bold;
         color: #edf4ff;
     }
-
     .node-detail {
         font-size: 12px;
         color: #9eb0c8;
         margin-top: 5px;
     }
-
     div.stButton > button {
         border-radius: 9px;
         min-height: 40px;
@@ -106,7 +98,6 @@ st.markdown(
 
 
 def record_event(event_type, details):
-    """Record a readable event in this dashboard session."""
     st.session_state.history.append({
         "time": datetime.now().astimezone().strftime(
             "%Y-%m-%d %H:%M:%S %z"
@@ -153,57 +144,46 @@ def calculate_risk(amount, status):
 def commit_transaction(state, amount, status):
     return state.commit_decision(
         "transaction",
-        {
-            "amount": amount,
-            "status": status,
-        },
+        {"amount": amount, "status": status},
     )
 
 
 def recompute_decisions(state, amount, status):
-    """Recalculate decisions using the demo policy."""
     risk_score = calculate_risk(amount, status)
     approved = status == "pending" and risk_score < 50
 
-    risk_result = state.commit_decision(
+    result = state.commit_decision(
         "risk_assessment",
         {"risk_score": risk_score},
     )
-
-    if not risk_result.get("committed", False):
+    if not result.get("committed", False):
         return False, risk_score, approved
 
-    approval_result = state.commit_decision(
+    result = state.commit_decision(
         "approval",
-        {
-            "approved": approved,
-            "risk_score": risk_score,
-        },
+        {"approved": approved, "risk_score": risk_score},
     )
-
-    if not approval_result.get("committed", False):
+    if not result.get("committed", False):
         return False, risk_score, approved
 
     if approved:
-        action_result = state.commit_decision(
+        result = state.commit_decision(
             "agent_action",
             {"action": "process_transaction"},
         )
-
-        if not action_result.get("committed", False):
+        if not result.get("committed", False):
             return False, risk_score, approved
     else:
-        # Keep any previously approved agent action stale
-        # after the approval has been changed to a denial.
-        next_version = state.versions["approval"] + 1
-        state.set_version("approval", next_version)
+        state.set_version(
+            "approval",
+            state.versions["approval"] + 1,
+        )
 
     return True, risk_score, approved
 
 
 if "system" not in st.session_state:
     state, executor = create_system()
-
     st.session_state.system = (state, executor)
     st.session_state.evidence_version = 1
     st.session_state.amount = 1000
@@ -219,27 +199,20 @@ if not st.session_state.initialized:
         st.session_state.amount,
         st.session_state.transaction_status,
     )
-
     state.commit_decision("inventory_data", {"stock": 50})
-
     state.commit_decision(
         "inventory_report",
         {"stock": 50, "report": "Inventory checked"},
     )
-
     recompute_decisions(
         state,
         st.session_state.amount,
         st.session_state.transaction_status,
     )
-
     st.session_state.initialized = True
-
-
 st.sidebar.title("🛡️ AEGISSTATE")
 st.sidebar.caption("DECISION INTEGRITY PLATFORM")
 st.sidebar.divider()
-
 st.sidebar.subheader("Evidence controls")
 
 st.sidebar.number_input(
@@ -249,7 +222,6 @@ st.sidebar.number_input(
     value=st.session_state.amount,
     key="amount_input",
 )
-
 st.sidebar.selectbox(
     "Transaction status",
     ["pending", "completed", "cancelled"],
@@ -281,7 +253,6 @@ if st.sidebar.button(
             "transaction",
             st.session_state.evidence_version,
         )
-
         commit_transaction(state, amount, status)
 
         record_event(
@@ -292,18 +263,16 @@ if st.sidebar.button(
     else:
         record_event(
             "NO CHANGE",
-            "The submitted values match the current evidence.",
+            "Submitted values match current evidence.",
         )
 
     st.rerun()
 
 st.sidebar.divider()
-
 st.sidebar.caption(
-    "Local demonstration only. This dashboard does not connect "
-    "to a live financial system or external agent."
+    "Local demonstration only. No live financial system or external "
+    "agent is connected."
 )
-
 
 st.markdown(
     """
@@ -323,53 +292,34 @@ risk_score = calculate_risk(
     st.session_state.amount,
     st.session_state.transaction_status,
 )
-
 policy_approves = (
     st.session_state.transaction_status == "pending"
     and risk_score < 50
 )
-
 approval_validation = state.validate("approval")
 
 c1, c2, c3, c4 = st.columns(4)
-
-c1.metric(
-    "Evidence version",
-    f"v{st.session_state.evidence_version}",
-)
-
-c2.metric(
-    "Risk score",
-    f"{risk_score}/100",
-)
-
-c3.metric(
-    "Current policy",
-    "APPROVE" if policy_approves else "DENY",
-)
-
+c1.metric("Evidence version", f"v{st.session_state.evidence_version}")
+c2.metric("Risk score", f"{risk_score}/100")
+c3.metric("Current policy", "APPROVE" if policy_approves else "DENY")
 c4.metric(
     "Stored approval",
     "VALID" if approval_validation.get("valid", False) else "STALE",
 )
 
 st.caption(
-    "The policy result is calculated from current inputs. "
-    "Stored decisions are separately checked by AegisState."
+    "Policy results use current inputs. Stored decisions are "
+    "independently checked by AegisState."
 )
-
 st.divider()
-
 
 st.markdown(
     '<div class="section-label">DEPENDENCY WORKSPACE</div>',
     unsafe_allow_html=True,
 )
-
 st.subheader("Decision dependency graph")
 
 left, right = st.columns([3, 2])
-
 workflow = [
     ("Transaction evidence", "transaction"),
     ("Risk assessment", "risk_assessment"),
@@ -383,14 +333,11 @@ with left:
         valid = result.get("valid", False)
 
         if not valid:
-            css = "stale"
-            status_text = "STALE / INVALID"
+            css, status_text = "stale", "STALE / INVALID"
         elif item == "approval" and not policy_approves:
-            css = "denied"
-            status_text = "VALID · DENIED"
+            css, status_text = "denied", "VALID · DENIED"
         else:
-            css = "valid"
-            status_text = "VALID"
+            css, status_text = "valid", "VALID"
 
         st.markdown(
             f"""
@@ -402,7 +349,6 @@ with left:
             """,
             unsafe_allow_html=True,
         )
-
         if index < len(workflow) - 1:
             st.markdown(
                 '<div style="text-align:center;color:#50d6c2;'
@@ -412,40 +358,28 @@ with left:
 
 with right:
     st.subheader("Evidence details")
-
     st.write("**Amount:**", f"{st.session_state.amount:,}")
     st.write("**Status:**", st.session_state.transaction_status)
-    st.write(
-        "**Evidence version:**",
-        st.session_state.evidence_version,
-    )
+    st.write("**Evidence version:**", st.session_state.evidence_version)
     st.write("**Risk score:**", risk_score)
 
     st.divider()
     st.subheader("Independent workflow")
-
-    inventory_validation = state.validate("inventory_report")
-
-    if inventory_validation.get("valid", False):
+    if state.validate("inventory_report").get("valid", False):
         st.success("Inventory report remains valid.")
     else:
         st.warning("Inventory report is stale or invalid.")
-
     st.caption(
-        "Updating transaction evidence should not invalidate "
-        "the independent inventory workflow."
+        "Transaction updates should not invalidate the independent "
+        "inventory workflow."
     )
 
-
 st.divider()
-
 st.markdown(
     '<div class="section-label">ACTION SECURITY</div>',
     unsafe_allow_html=True,
 )
-
 st.subheader("Protected execution")
-
 st.write(
     "Attempt the demonstration action. The executor checks "
     "whether its required decision is valid."
@@ -458,41 +392,24 @@ if st.button("Attempt agent action", type="primary"):
             "agent_action",
             lambda: "Demonstration action completed",
         )
-
         if execution.get("executed", False):
             st.success("The protected executor permitted the action.")
-            record_event(
-                "ACTION EXECUTED",
-                "The protected executor permitted the demonstration action.",
-            )
+            record_event("ACTION EXECUTED", "Demonstration action permitted.")
         else:
             st.error("The protected executor blocked the action.")
-            record_event(
-                "ACTION BLOCKED",
-                "The required decision was not valid.",
-            )
-
+            record_event("ACTION BLOCKED", "Required decision was invalid.")
         st.json(execution)
-
     except Exception as error:
         st.error("The execution attempt raised an exception.")
         st.code(f"{type(error).__name__}: {error}")
-
-        record_event(
-            "EXECUTION ERROR",
-            f"{type(error).__name__}: {error}",
-        )
-
+        record_event("EXECUTION ERROR", f"{type(error).__name__}: {error}")
 
 st.divider()
-
 st.markdown(
     '<div class="section-label">DECISION MANAGEMENT</div>',
     unsafe_allow_html=True,
 )
-
 st.subheader("Recompute dependent decisions")
-
 st.write(
     "Recalculate the risk assessment and approval using the "
     "current demonstration policy."
@@ -505,18 +422,14 @@ if st.button("Recompute decisions"):
             st.session_state.amount,
             st.session_state.transaction_status,
         )
-
         if success:
             record_event(
                 "DECISION RECOMPUTE",
-                f"Decisions recomputed at evidence version "
+                f"Recomputed at evidence version "
                 f"{st.session_state.evidence_version}.",
             )
-
             if approved:
-                st.success(
-                    f"Approval committed. Risk score: {score}/100."
-                )
+                st.success(f"Approval committed. Risk score: {score}/100.")
             else:
                 st.warning(
                     f"Denial committed. Risk score: {score}/100. "
@@ -524,49 +437,32 @@ if st.button("Recompute decisions"):
                 )
         else:
             st.error("Decision recomputation did not complete.")
-            record_event(
-                "RECOMPUTE FAILURE",
-                "The engine did not confirm that all decisions committed.",
-            )
-
+            record_event("RECOMPUTE FAILURE", "Not all decisions committed.")
     except Exception as error:
         st.error("Decision recomputation raised an exception.")
         st.code(f"{type(error).__name__}: {error}")
-
-        record_event(
-            "RECOMPUTE ERROR",
-            f"{type(error).__name__}: {error}",
-        )
-
+        record_event("RECOMPUTE ERROR", f"{type(error).__name__}: {error}")
     st.rerun()
 
-
 st.divider()
-
 st.markdown(
     '<div class="section-label">AUDIT ACTIVITY</div>',
     unsafe_allow_html=True,
 )
-
 st.subheader("Security event feed")
-
 history = st.session_state.history
 
 st.caption(
-    f"{len(history)} events recorded in this dashboard session. "
+    f"{len(history)} events recorded in this session. "
     "Showing the latest 10."
 )
-
 if history:
     for event in reversed(history[-10:]):
         with st.container(border=True):
             if isinstance(event, dict):
-                st.caption(
-                    f"{event['time']}  ·  {event['type']}"
-                )
+                st.caption(f"{event['time']} · {event['type']}")
                 st.write(event["details"])
             else:
-                # Display older entries created before this upgrade.
                 st.write(event)
 else:
     st.info("No events recorded yet.")
@@ -575,8 +471,78 @@ if st.button("Clear visible event history"):
     st.session_state.history = []
     st.rerun()
 
+# NEW: Performance benchmark panel
 st.divider()
+st.markdown(
+    '<div class="section-label">PERFORMANCE ANALYSIS</div>',
+    unsafe_allow_html=True,
+)
+st.subheader("Dependency graph benchmark")
+st.write(
+    "Measure decision validation and root-change invalidation "
+    "across dependency chains of increasing size."
+)
+st.caption(
+    f"Graph sizes: {', '.join(map(str, GRAPH_SIZES))} nodes · "
+    f"{TRIALS} trials · {VALIDATIONS_PER_TRIAL} validations per trial."
+)
 
+st.info(
+    "This benchmark creates separate test graphs. It does not "
+    "intentionally modify your live demonstration state."
+)
+
+if st.button("Run performance benchmark", type="primary"):
+    results = []
+    try:
+        with st.spinner("Running benchmarks. Please wait..."):
+            for size in GRAPH_SIZES:
+                results.append({
+                    "Graph size (nodes)": size,
+                    "Validation median (ms)": round(
+                        benchmark_validation(size), 3
+                    ),
+                    "Invalidation median (ms)": round(
+                        benchmark_invalidation(size), 3
+                    ),
+                })
+
+        st.session_state.benchmark_results = results
+        st.session_state.benchmark_environment = {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+        }
+        record_event(
+            "BENCHMARK COMPLETE",
+            f"Measured dependency chains: {GRAPH_SIZES}.",
+        )
+    except Exception as error:
+        st.error("Benchmark failed.")
+        st.code(f"{type(error).__name__}: {error}")
+
+if "benchmark_results" in st.session_state:
+    results = st.session_state.benchmark_results
+    environment = st.session_state.benchmark_environment
+    results_df = pd.DataFrame(results)
+
+    st.success("Benchmark results are available.")
+    st.dataframe(results_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### Latency by graph size")
+    chart_df = results_df.set_index("Graph size (nodes)")[
+        ["Validation median (ms)", "Invalidation median (ms)"]
+    ]
+    st.line_chart(chart_df)
+
+    st.markdown("### Environment")
+    st.write("**Python:**", environment["python"])
+    st.write("**Platform:**", environment["platform"])
+    st.caption(
+        "Results represent this run only. Performance varies by hardware "
+        "and system load; these measurements are not universal guarantees."
+    )
+
+st.divider()
 st.caption(
     "AegisState · Local demonstration · "
     "Activity history is session-local and is not a persistent audit log."
