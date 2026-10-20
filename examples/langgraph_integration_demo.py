@@ -98,6 +98,3 @@ if __name__ == "__main__":
     assert stale["execution"]["executed"] is False
 
     print("\nPASS: Both integration scenarios behaved as expected.")
-PY
-
-python examples/langgraph_integration_demo.py
