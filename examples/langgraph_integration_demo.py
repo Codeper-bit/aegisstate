@@ -1,6 +1,4 @@
-mkdir -p examples
 
-cat > examples/langgraph_integration_demo.py <<'PY'
 from typing import TypedDict
 
 from langgraph.graph import StateGraph, START, END
