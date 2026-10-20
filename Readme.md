@@ -31,7 +31,7 @@ AegisState makes those dependencies explicit and enforces them at the one place 
 
 - **Dependency graph.** Declare which items depend on which, with cycle detection.
 - **Targeted invalidation.** A change invalidates its downstream decisions only. Unrelated decisions stay valid.
-- **Protected execution.** `ProtectedExecutor` runs an action only while its required decision is valid, and logs every outcome.
+- **Protected execution.** `ProtectedExecutor` runs an action only while its required decision is valid, guards the check-and-action interval against updates made through the same in-process `AegisState` instance, and logs every outcome.
 - **Provenance.** Each committed decision records the dependency versions it was built on.
 - **Report ingestion.** Schema-validated agent reports, with evidence-version checks and an allow-list of decisions each report type may commit.
 - **Replay protection.** Duplicate report IDs are rejected, using an in-memory or SQLite-backed store with crash recovery.
@@ -114,6 +114,16 @@ To recover, recommit the decisions **upstream to downstream** (`risk_assessment`
 
 The execution log (`executor.get_execution_log()`) is bounded and omits action results by default, so long-running processes do not leak memory or retain sensitive output.
 
+### Concurrency protection
+
+`ProtectedExecutor` uses AegisState's validation guard to cover the interval between checking a decision and running the action. Within a single process, updates made through the **same `AegisState` instance** (for example `set_version` or `commit_decision` from another thread) are coordinated with that interval, so a decision cannot go stale in the middle of a protected execution through that instance.
+
+The scope of this protection is deliberately narrow:
+
+- It applies to one in-process `AegisState` instance. Separate instances, separate processes and separate machines do not share the guard.
+- It covers the check and the call to your function. It does not make the external operation itself (a payment API call, a database write, a message sent) atomic, reversible or safe. If the outside world changes while that operation is in flight, AegisState cannot see it.
+- It does not provide distributed coordination. High-impact actions that span services still need their own mechanisms, such as idempotency keys, transactions or locks at the system that performs the side effect.
+
 ## API overview
 
 | Method | Purpose |
@@ -188,7 +198,7 @@ What the bridge enforces:
 
 ## Performance
 
-On a 100-decision dependency chain, validating the final decision averaged about **0.11 ms**, and invalidating the entire chain from its root took about **0.07 ms**. These figures were measured on a development sandbox, so run the benchmark on your own hardware:
+Performance depends on your hardware, Python version and graph shape, so no fixed figures are published here. Run the benchmark on your own machine to measure it:
 
 ```bash
 python -m aegisstate.benchmark
@@ -203,13 +213,14 @@ AegisState strengthens the integrity of decision-dependent workflows. It is **no
 - Detecting that tracked decisions are stale after relevant version changes.
 - Leaving unrelated decisions valid.
 - Blocking actions routed through `ProtectedExecutor` when their decision is invalid.
+- Coordinating the check-and-action interval with updates made through the same in-process `AegisState` instance.
 - Rejecting malformed, out-of-policy, stale and duplicate reports.
 
 **What it does not guarantee**
 
 - That evidence is authentic or accurate, or that an agent reasoned correctly or actually used the evidence it cites.
 - That every action is protected. Code paths that bypass the executor are outside its control.
-- That validation and the external side effect are atomic. A decision can go stale between the check and the action, so high-impact actions need their own coordination.
+- That external operations are atomic or safe. The guard covers the check and the call to your function within one process; it cannot control what happens inside an external system, and evidence changed through a different `AegisState` instance, process or machine is not covered. High-impact actions need their own coordination.
 - Authentication, authorization or transport security. Authenticate reports (for example with an HMAC or signature) *before* they reach the bridge, because replay protection is only as strong as the authenticity of the report ID.
 - Distributed coordination. Replay stores are single-node, and report processing and decision commits are not one atomic transaction across failures.
 
@@ -237,7 +248,7 @@ pip install -e .
 python -m unittest discover -s aegisstate/tests -v
 ```
 
-The suite (91 tests) covers dependency invalidation, validation, protected execution, report handling, replay stores and crash recovery, concurrency and input hardening. Examples are in [`examples/`](https://github.com/Codeper-bit/aegisstate/tree/main/examples).
+The suite (96 passing tests) covers dependency invalidation, validation, protected execution, report handling, replay stores and crash recovery, concurrency and input hardening. Examples are in [`examples/`](https://github.com/Codeper-bit/aegisstate/tree/main/examples).
 
 Issues and pull requests are welcome at [github.com/Codeper-bit/aegisstate](https://github.com/Codeper-bit/aegisstate).
 
