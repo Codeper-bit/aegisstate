@@ -87,3 +87,24 @@ class TestExecutionRace(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_evidence_update_can_proceed_after_action_raises(self):
+        state = self.make_state()
+        executor = ProtectedExecutor(state)
+
+        def failing_action():
+            raise RuntimeError("Simulated action failure")
+
+        with self.assertRaises(RuntimeError):
+            executor.execute(
+                "test_action",
+                "approval",
+                failing_action,
+            )
+
+        # The action failed, but the state lock should have been released.
+        state.set_version("transaction", 2)
+
+        self.assertFalse(state.validate("approval")["valid"])
+        
