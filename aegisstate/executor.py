@@ -39,18 +39,37 @@ class ProtectedExecutor:
         if not callable(action):
             raise TypeError("action must be callable")
 
-        validation = self.state.validate(required_decision)
+        # AegisState's guard holds the same lock used by evidence updates,
+        # preventing a local update between validation and action completion.
+        # The fallback preserves compatibility with state-like objects that
+        # implement only validate(), but does not provide atomicity for them.
+        guard = getattr(self.state, "validation_guard", None)
 
-        if not validation["valid"]:
-            result = {
-                "executed": False,
-                "action": action_name,
-                "reason": validation["reason"],
-            }
+        if guard is None:
+            validation = self.state.validate(required_decision)
+            if not validation["valid"]:
+                result = {
+                    "executed": False,
+                    "action": action_name,
+                    "reason": validation["reason"],
+                }
+                self.execution_log.append(result)
+                return dict(result)
+            return self._run_action(action_name, action)
 
-            self.execution_log.append(result)
-            return dict(result)
+        with guard(required_decision) as validation:
+            if not validation["valid"]:
+                result = {
+                    "executed": False,
+                    "action": action_name,
+                    "reason": validation["reason"],
+                }
+                self.execution_log.append(result)
+                return dict(result)
 
+            return self._run_action(action_name, action)
+
+    def _run_action(self, action_name, action):
         try:
             action_result = action()
         except Exception as exc:
